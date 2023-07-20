@@ -32,50 +32,73 @@ class DateTimeService
 
     public $lazyLoadedPublicHolidays;
 
+    public function validateState($state) {
+        if (!in_array($state, self::VALID_STATES)) {
+            throw new Exception("State must be one of " . implode(", ", self::VALID_STATES));
+        }
+    }
+
+    public function getWorkingHoursBetween($state, DateTime $from, DateTime $to): float|int
+    {
+        $this->validateState($state);
+
+        // work day seconds
+        $workdayStartHour = 8;
+        $workdayEndHour = 18;
+
+        // work days between dates, minus 1 day
+        $numberOfWorkingDays = max(0, $this->getNumberOfWorkingDaysBetween($state, $from, $to) - 1);
+
+        // 8am to 6pm
+        $fromHours = min($workdayEndHour, max($workdayStartHour, $from->format("H")));
+        $fromMinutes = $from->format("i");
+        if ($fromHours >= 18) {
+            $fromMinutes = 0;
+        }
+
+        $toHours = min($workdayEndHour, max($workdayStartHour, $to->format("H")));
+        $toMinutes = $to->format("i");
+        if ($toHours >= 18) {
+            $toMinutes = 0;
+        }
+
+        $startTimeInSeconds = $fromHours * 3600 + $fromMinutes * 60;
+        $endTimeInSeconds = $toHours * 3600 + $toMinutes * 60;
+
+        $numberOfSecondsInWorkDay = ($workdayEndHour - $workdayStartHour) * 3600;
+
+        // calculate number of hours difference, 10 working hours per day
+        return (($numberOfWorkingDays * $numberOfSecondsInWorkDay) + $endTimeInSeconds - $startTimeInSeconds) / 86400 * 24;
+    }
+
     /**
      * I am in a habit of making all my functions public as I unit test every function individually and mock out any
      * sub functions the function I am testing calls
      * @param $state
-     * @param $from
-     * @param $to
-     * @param bool $skipWeekends
-     * @param bool $skipPublicHolidays
+     * @param DateTime $from
+     * @param DateTime $to
      * @return int
      * @throws Exception
      */
-    public function getNumberOfWorkingDaysBetween($state, $from, $to, bool $skipWeekends = true, bool $skipPublicHolidays = true): int
+    public function getNumberOfWorkingDaysBetween($state, DateTime $from, DateTime $to): int
     {
-        // could also throw an exception
-        if (!in_array($state, self::VALID_STATES)) {
-            throw new Exception("State must be one of " . implode(", ", self::VALID_STATES));
-        }
-        /**
-         * Great validation library
-         * https://laravel.com/docs/10.x/validation#available-validation-rules
-         */
-        $fromDateTime = new DateTime($from);
-        $toDateTime = new DateTime($to);
-
+        $this->validateState($state);
         $days = 0;
-        while ($fromDateTime < $toDateTime) {
-            if ($skipPublicHolidays && !$this->isDateOnAPublicHoliday($state, $fromDateTime)) {
-                continue;
+        while ($from < $to) {
+            if ($this->isDateOnAPublicHoliday($state, $from) && $this->isDateOnAWeekend($state)) {
+                $days++;
             }
-            if ($skipWeekends && !$this->isDateOnAWeekend($state)) {
-                continue;
-            }
-            $fromDateTime->modify('+1 day');
-            $days++;
+            $from->modify('+1 day');
         }
         return $days;
     }
 
-    public function isDateOnAWeekend(DateTime $dateTime)
+    public function isDateOnAWeekend(DateTime $dateTime): bool
     {
         return in_array($dateTime->format('l'), ["Saturday", "Sunday"]);
     }
 
-    public function isDateOnAPublicHoliday($state, DateTime $dateTime)
+    public function isDateOnAPublicHoliday($state, DateTime $dateTime): bool
     {
         // hard coding to South Australia
         return in_array($dateTime->format("Y-m-d"), $this->getPublicHolidaysAsYMDArray($state));
